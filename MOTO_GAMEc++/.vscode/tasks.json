@@ -1,0 +1,32 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build SDL3 Project (MinGW)",
+            "type": "shell",
+            "command": "g++",
+            "args": [
+                "-g",
+                "-std=c++17",
+                "${workspaceFolder}\\MotoGame\\MOTO_GAMEc++\\src\\main.cpp",
+                "-I", "C:/libraries/SDL3/include",
+                "-L", "C:/libraries/SDL3/lib",
+                "-I", "C:/libraries/SDL3_image/include",
+                "-L", "C:/libraries/SDL3_image/lib",
+
+                "-lmingw32", 
+                "-lSDL3",
+                "-lSDL3_image",  
+                
+                "-o",
+                "${workspaceFolder}\\main.exe"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": ["$gcc"],
+            "detail": "Compiles main.cpp with SDL3 using MinGW g++"
+        }
+    ]
+}
