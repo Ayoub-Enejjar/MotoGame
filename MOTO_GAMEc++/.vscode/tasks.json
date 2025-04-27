@@ -13,11 +13,9 @@
                 "-L", "C:/libraries/SDL3/lib",
                 "-I", "C:/libraries/SDL3_image/include",
                 "-L", "C:/libraries/SDL3_image/lib",
-
                 "-lmingw32", 
                 "-lSDL3",
                 "-lSDL3_image",  
-                
                 "-o",
                 "${workspaceFolder}\\main.exe"
             ],
