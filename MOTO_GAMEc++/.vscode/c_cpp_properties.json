@@ -4,8 +4,11 @@
       "name": "windows-gcc-x64",
       "includePath": [
         "${workspaceFolder}/**",
-        "C:/libraries/SDL3/include/**",
-         "C:/libraries/SDL3_image/include/**"
+        "C:/libraries/SDL2/include/**",
+         "C:/libraries/SDL2_image/include/**",
+          "C:/libraries/SDL2_ttf/include/**",
+          "C:/libraries/SDL2_mixer/include/**"
+
       ],
       "defines": [
         "_DEBUG",

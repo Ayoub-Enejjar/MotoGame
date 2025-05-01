@@ -2,29 +2,41 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Build SDL3 Project (MinGW)",
+            "label": "Build SDL2 Project",
             "type": "shell",
             "command": "g++",
             "args": [
                 "-g",
                 "-std=c++17",
-                "${workspaceFolder}\\MotoGame\\MOTO_GAMEc++\\src\\main.cpp",
-                "-I", "C:/libraries/SDL3/include",
-                "-L", "C:/libraries/SDL3/lib",
-                "-I", "C:/libraries/SDL3_image/include",
-                "-L", "C:/libraries/SDL3_image/lib",
-                "-lmingw32", 
-                "-lSDL3",
-                "-lSDL3_image",  
-                "-o",
-                "${workspaceFolder}\\main.exe"
+                // Source files
+                "${workspaceFolder}/MotoGame/MOTO_GAMEc++/src/*.cpp",
+                // Include paths
+                "-I", "${workspaceFolder}/MotoGame/MOTO_GAMEc++/includes",
+                "-I", "C:/libraries/SDL2/include/SDL2",
+                "-I", "C:/libraries/SDL2_image/include",
+                "-I", "C:/libraries/SDL2_mixer/include",
+                "-I", "C:/libraries/SDL2_ttf/include",
+                // Library paths
+                "-L", "C:/libraries/SDL2/lib",
+                "-L", "C:/libraries/SDL2_image/lib",
+                "-L", "C:/libraries/SDL2_ttf/lib",
+                "-L", "C:/libraries/SDL2_mixer/lib",
+                // Libraries
+                "-lmingw32",
+                "-lSDL2main",
+                "-lSDL2",
+                "-lSDL2_image",
+                "-lSDL2_ttf",
+                "-lSDL2_mixer",
+                "-mwindows",
+                // Output
+                "-o", "${workspaceFolder}/MotoGame/MOTO_GAMEc++/bin/main.exe"
             ],
             "group": {
                 "kind": "build",
                 "isDefault": true
             },
-            "problemMatcher": ["$gcc"],
-            "detail": "Compiles main.cpp with SDL3 using MinGW g++"
+            "problemMatcher": ["$gcc"]
         }
     ]
 }
