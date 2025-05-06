@@ -8,14 +8,15 @@
             "args": [
                 "-g",
                 "-std=c++17",
-                // Source files
-                "${workspaceFolder}/MotoGame/MOTO_GAMEc++/src/*.cpp",
+                // Source files 
+                "${workspaceFolder}/MotoGame/MOTO_GAMEc++/src/main.cpp",
+                
                 // Include paths
                 "-I", "${workspaceFolder}/MotoGame/MOTO_GAMEc++/includes",
                 "-I", "C:/libraries/SDL2/include/SDL2",
-                "-I", "C:/libraries/SDL2_image/include",
-                "-I", "C:/libraries/SDL2_mixer/include",
-                "-I", "C:/libraries/SDL2_ttf/include",
+                "-I", "C:/libraries/SDL2_image/include/SDL2_image",
+                "-I", "C:/libraries/SDL2_mixer/include/SDL2_mixer",
+                "-I", "C:/libraries/SDL2_ttf/include/SDL2_ttf",
                 // Library paths
                 "-L", "C:/libraries/SDL2/lib",
                 "-L", "C:/libraries/SDL2_image/lib",
@@ -28,10 +29,12 @@
                 "-lSDL2_image",
                 "-lSDL2_ttf",
                 "-lSDL2_mixer",
-                "-mwindows",
                 // Output
                 "-o", "${workspaceFolder}/MotoGame/MOTO_GAMEc++/bin/main.exe"
             ],
+            "options": {
+                "cwd": "${workspaceFolder}" // <<< Important pour les assets
+            },
             "group": {
                 "kind": "build",
                 "isDefault": true
