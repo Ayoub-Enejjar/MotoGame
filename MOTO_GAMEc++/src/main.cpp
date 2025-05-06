@@ -11,7 +11,7 @@
 
 // --- Configuration ---
 const int SCREEN_WIDTH = 1100; // User specified width
-const int SCREEN_HEIGHT = 720; // User specified height
+const int SCREEN_HEIGHT = 700; // User specified height
 const char* WINDOW_TITLE = "MotoGame (SDL2)"; // Game title
 
 // Menu Config
@@ -48,7 +48,9 @@ enum class GameState {
     INTRO,
     ABOUT,
     PLAYING,
-    LOSE,  // New state for lose screen
+    WIN_DELAY,  // New state for win delay
+    LOSE,
+    WIN,
     EXIT
 };
 
@@ -62,7 +64,7 @@ TTF_Font* gFont = nullptr;
 SDL_Color gTextColor = { 255, 255, 255, 255 };       // Default white text
 SDL_Color gButtonHoverColor = { 255, 255, 0, 255 };  // Yellow on hover
 SDL_Color gHeaderColor = {255, 200, 0, 255};       // Yellowish for About headers
-SDL_Color gAboutTextColor = {220, 220, 220, 255};    // Light grey for About text
+SDL_Color gAboutTextColor = {0, 0, 0, 255};    // Light grey for About text
 
 // Menu State
 SDL_Rect gPlayButtonRect = { BUTTON_X - 10, BUTTON_Y_PLAY - 10, BUTTON_WIDTH, BUTTON_HEIGHT };
@@ -87,10 +89,16 @@ SDL_Texture* gGameBgFarTexture = nullptr;
 SDL_Texture* gPlayerTexture = nullptr;  // New texture for player
 SDL_Texture* gBarrierTexture = nullptr;  // New texture for barriers
 SDL_Texture* gLoseScreenTexture = nullptr;  // New texture for lose screen
+SDL_Texture* gWinScreenTexture = nullptr;   // New texture for win screen
 Mix_Chunk* gLoseSound = nullptr;            // New sound for lose screen
+Mix_Chunk* gWinSound = nullptr;             // New sound for win screen
 float gPlayerY = 0.0f;     // Player square's current vertical position (top edge)
 bool gMoveUp = false;      // Is UP key currently held down?
 bool gMoveDown = false;    // Is DOWN key currently held down?
+float gGameTimer = 0.0f;                    // Timer for tracking survival time
+const float WIN_TIME = 10.0f;               // Time needed to win (10 seconds)
+float gWinDelayTimer = 0.0f;              // Timer for win delay
+const float WIN_DELAY_TIME = 3.0f;        // 3 seconds delay
 
 // Barrier structure
 struct Barrier {
@@ -244,10 +252,21 @@ bool loadMedia() {
     if (gLoseScreenTexture == nullptr) { std::cerr << "WARNING: Failed to load lose screen texture!" << std::endl; }
     std::cout << "    Lose screen texture loaded." << std::endl;
 
-    std::cout << " -> Loading Lose Sound: ../assets/audio/lose_slide.wav" << std::endl;
-    gLoseSound = Mix_LoadWAV("../assets/audio/lose_slide.wav");
+    std::cout << " -> Loading Lose Sound: ../assets/audio/lose_audio.wav" << std::endl;
+    gLoseSound = Mix_LoadWAV("../assets/audio/lose_audio.wav");
     if (gLoseSound == nullptr) { std::cerr << "WARNING: Failed to load lose sound! SDL_mixer Error: " << Mix_GetError() << std::endl; }
     std::cout << "    Lose sound loaded." << std::endl;
+
+    // Load Win Screen Assets
+    std::cout << " -> Loading Win Screen Texture: ../assets/images/endscreen/win_slide.png" << std::endl;
+    gWinScreenTexture = loadTexture("../assets/images/endscreen/win_slide.png", gRenderer);
+    if (gWinScreenTexture == nullptr) { std::cerr << "WARNING: Failed to load win screen texture!" << std::endl; }
+    std::cout << "    Win screen texture loaded." << std::endl;
+
+    std::cout << " -> Loading Win Sound: ../assets/audio/win_audio.wav" << std::endl;
+    gWinSound = Mix_LoadWAV("../assets/audio/win_audio.wav");
+    if (gWinSound == nullptr) { std::cerr << "WARNING: Failed to load win sound! SDL_mixer Error: " << Mix_GetError() << std::endl; }
+    std::cout << "    Win sound loaded." << std::endl;
 
     // TODO: Load Character Select, Win/Lose assets here
 
@@ -271,6 +290,8 @@ void closeSDL() {
     if (gBarrierTexture) { SDL_DestroyTexture(gBarrierTexture); gBarrierTexture = nullptr; }
     if (gLoseScreenTexture) { SDL_DestroyTexture(gLoseScreenTexture); gLoseScreenTexture = nullptr; }
     if (gLoseSound) { Mix_FreeChunk(gLoseSound); gLoseSound = nullptr; }
+    if (gWinScreenTexture) { SDL_DestroyTexture(gWinScreenTexture); gWinScreenTexture = nullptr; }
+    if (gWinSound) { Mix_FreeChunk(gWinSound); gWinSound = nullptr; }
     // TODO: Free Character Select, Win/Lose textures here
     // Free Font
     if (gFont) { TTF_CloseFont(gFont); gFont = nullptr; }
@@ -399,6 +420,16 @@ int main(int argc, char* args[]) {
                     }
                 } break;
 
+                case GameState::WIN: {
+                    if (e.type == SDL_MOUSEBUTTONDOWN || (e.type == SDL_KEYDOWN && e.key.repeat == 0)) {
+                        std::cout << "EVENT: Returning to menu from win screen." << std::endl;
+                        gCurrentState = GameState::MENU;
+                        if (gMenuMusic != nullptr && Mix_PlayingMusic() == 0) {
+                            Mix_PlayMusic(gMenuMusic, -1);
+                        }
+                    }
+                } break;
+
                 default: break;
             } // End event switch
              if (gCurrentState == GameState::EXIT) break; // Exit poll loop if state changed to EXIT
@@ -433,6 +464,17 @@ int main(int argc, char* args[]) {
             } break;
             case GameState::ABOUT: { /* No updates needed */ } break;
             case GameState::PLAYING: {
+                 // Update game timer
+                 gGameTimer += deltaTime;
+                 
+                 // Check for win condition
+                 if (gGameTimer >= WIN_TIME) {
+                     std::cout << "Win condition met! Player survived for " << WIN_TIME << " seconds!" << std::endl;
+                     // Change to win delay state
+                     gCurrentState = GameState::WIN_DELAY;
+                     gWinDelayTimer = 0.0f;  // Reset delay timer
+                 }
+
                  // Update player position
                  float deltaY = 0.0f;
                  if (gMoveUp) { deltaY -= PLAYER_VERT_SPEED * deltaTime; }
@@ -499,6 +541,17 @@ int main(int argc, char* args[]) {
                          }
                      }
                  }
+            } break;
+            case GameState::WIN_DELAY: {
+                gWinDelayTimer += deltaTime;
+                if (gWinDelayTimer >= WIN_DELAY_TIME) {
+                    // Play win sound
+                    if (gWinSound != nullptr) {
+                        Mix_PlayChannel(-1, gWinSound, 0);
+                    }
+                    // Change to win state
+                    gCurrentState = GameState::WIN;
+                }
             } break;
             default: break;
         } // End update switch
@@ -584,6 +637,10 @@ int main(int argc, char* args[]) {
                     SDL_SetRenderDrawColor(gRenderer, 255, 0, 0, 255);
                     SDL_RenderFillRect(gRenderer, &playerRect);
                 }
+
+                // Render timer
+                std::string timerText = "Time: " + std::to_string((int)(WIN_TIME - gGameTimer)) + "s";
+                renderText(timerText, 20, 20, gFont, gTextColor, gRenderer);
             } break;
 
             case GameState::LOSE: {
@@ -593,8 +650,54 @@ int main(int argc, char* args[]) {
                     SDL_SetRenderDrawColor(gRenderer, 0x11, 0x11, 0x11, 0xFF);
                     SDL_RenderClear(gRenderer);
                     renderText("GAME OVER!", SCREEN_WIDTH/2 - 100, SCREEN_HEIGHT/2 - 50, gFont, gTextColor, gRenderer);
-                    renderText("Click or press any key to return to menu", SCREEN_WIDTH/2 - 200, SCREEN_HEIGHT/2 + 50, gFont, gButtonHoverColor, gRenderer);
+                    renderText("", SCREEN_WIDTH/2 - 200, SCREEN_HEIGHT/2 + 50, gFont, gButtonHoverColor, gRenderer);
                 }
+            } break;
+
+            case GameState::WIN: {
+                if (gWinScreenTexture != nullptr) {
+                    SDL_RenderCopy(gRenderer, gWinScreenTexture, nullptr, nullptr);
+                } else {
+                    SDL_SetRenderDrawColor(gRenderer, 0x11, 0x11, 0x11, 0xFF);
+                    SDL_RenderClear(gRenderer);
+                    renderText("YOU WIN!", SCREEN_WIDTH/2 - 100, SCREEN_HEIGHT/2 - 50, gFont, gTextColor, gRenderer);
+                    renderText("", SCREEN_WIDTH/2 - 200, SCREEN_HEIGHT/2 + 50, gFont, gButtonHoverColor, gRenderer);
+                }
+            } break;
+
+            case GameState::WIN_DELAY: {
+                // Keep showing the game screen during delay
+                if (gGameBgFarTexture != nullptr) { 
+                    SDL_RenderCopy(gRenderer, gGameBgFarTexture, nullptr, nullptr); 
+                } else { 
+                    SDL_SetRenderDrawColor(gRenderer, 0x11, 0x11, 0x33, 0xFF); 
+                    SDL_RenderClear(gRenderer); 
+                }
+
+                // Render barriers
+                for (const auto& barrier : gBarriers) {
+                    if (barrier.active) {
+                        SDL_Rect barrierRect = { (int)barrier.x, (int)barrier.y, BARRIER_WIDTH, BARRIER_HEIGHT };
+                        if (gBarrierTexture != nullptr) {
+                            SDL_RenderCopy(gRenderer, gBarrierTexture, nullptr, &barrierRect);
+                        } else {
+                            SDL_SetRenderDrawColor(gRenderer, 255, 0, 0, 255);
+                            SDL_RenderFillRect(gRenderer, &barrierRect);
+                        }
+                    }
+                }
+
+                // Render player
+                SDL_Rect playerRect = { PLAYER_START_X, (int)gPlayerY, PLAYER_SQUARE_SIZE, PLAYER_SQUARE_SIZE };
+                if (gPlayerTexture != nullptr) {
+                    SDL_RenderCopy(gRenderer, gPlayerTexture, nullptr, &playerRect);
+                } else {
+                    SDL_SetRenderDrawColor(gRenderer, 255, 0, 0, 255);
+                    SDL_RenderFillRect(gRenderer, &playerRect);
+                }
+
+                // Render "YOU WIN!" text
+                renderText("YOU WIN!", SCREEN_WIDTH/2 - 100, SCREEN_HEIGHT/2 - 50, gFont, gTextColor, gRenderer);
             } break;
 
             default: {
