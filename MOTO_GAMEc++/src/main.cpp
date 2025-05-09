@@ -5,74 +5,20 @@
 #include <iostream>
 #include <string>
 #include <vector>
-#include <chrono>    // For delta time calculation
-#include <algorithm> // For std::min/max
-#include <random>    // For random barrier generation
-#include <cmath>     // For powf
+#include <chrono>
+#include <algorithm>
+#include <random>
+#include <cmath>
 
-# define SCREEN_WIDTH 1045 // User specified width
-# define SCREEN_HEIGHT 690 // User specified height
-# define PLAYER_SQUARE_SIZE 95 // Player size
-# define ROAD_HEIGHT 170 // Height of the road (reduced from 180)
+// Project-Specific Headers
+#include "config.h"    // Defines and consts
+#include "types.h"     // Enums and structs
+#include "globals.h"   // Extern global variable declarations
+#include "functions.h" // Function prototypes
 
-const char* WINDOW_TITLE = "BROTHERHOOD"; // Game title
+// --- Global Variable Definitions ---
+const char* const WINDOW_TITLE = "BROTHERHOOD"; // Definition
 
-// Road and Player Bounds
-const int ROAD_Y = SCREEN_HEIGHT - ROAD_HEIGHT; // Position road at bottom of screen
-const int PLAYER_BOUNDS_TOP = ROAD_Y;
-const int PLAYER_BOUNDS_BOTTOM = ROAD_Y + ROAD_HEIGHT - PLAYER_SQUARE_SIZE;
-
-// Menu Config
-const int BUTTON_WIDTH = 250;
-const int BUTTON_HEIGHT = 100;
-const int BUTTON_X = 50;
-const int BUTTON_Y_PLAY = 200;
-const int BUTTON_Y_CHARACTER = 320;
-const int BUTTON_Y_ABOUT = 440;
-const int BUTTON_Y_QUIT = 560;
-const int MENU_ANIM_FRAMES = 4;
-const float MENU_ANIM_SPEED = 0.25f;
-
-// Intro Config
-const int INTRO_SLIDE_COUNT = 4;
-const Uint32 SLIDE_DEFAULT_DURATION_MS = 22000;
-
-// Gameplay Config
-const float PLAYER_VERT_SPEED = 300.0f;
-const float PLAYER_HORIZ_SPEED = 100.0f;
-const float PLAYER_HORIZ_MOVE_RANGE = 20.0f;
-const float BACKGROUND_SCROLL_SPEED = 200.0f; // For far background
-const int PLAYER_START_X = 100;
-const int BARRIER_WIDTH = 50;
-const int BARRIER_HEIGHT = 50;
-const float BARRIER_SPEED = 400.0f;
-const float BARRIER_SPAWN_INTERVAL = 2.0f;
-const int MAX_BARRIERS = 5;
-
-const int COIN_WIDTH = BARRIER_WIDTH / 2;
-const int COIN_HEIGHT = BARRIER_HEIGHT / 2;
-
-// Road Perspective Config (Texture does NOT scroll on the road surface itself)
-// MODIFIED for road to fill screen width:
-const float ROAD_PERSPECTIVE_FAR_SCALE = 1.0f;  // Road width scale at the top (Set to 1.0f to make it full width)
-const float ROAD_PERSPECTIVE_NEAR_SCALE = 1.0f; // Road width scale at the bottom (Remains 1.0f for full width)
-const float ROAD_TEXTURE_V_POWER = 1.2f;      // Power for V-texture mapping (Kept from previous "flatter" step)
-const float ROAD_TEXTURE_V_START_OFFSET = 0.0f;
-
-// --- Game States ---
-enum class GameState {
-    MENU,
-    INTRO,
-    ABOUT,
-    CHARACTER_SELECT,
-    PLAYING,
-    WIN_DELAY,
-    LOSE,
-    WIN,
-    EXIT
-};
-
-// --- Global Variables ---
 SDL_Window* gWindow = nullptr;
 SDL_Renderer* gRenderer = nullptr;
 TTF_Font* gFont = nullptr;
@@ -104,13 +50,13 @@ Mix_Music* gMenuMusic = nullptr;
 std::vector<SDL_Texture*> gIntroSlides;
 std::vector<Mix_Chunk*> gIntroAudio;
 SDL_Texture* gSkipButtonTexture = nullptr;
-SDL_Rect gSkipButtonRect;
+SDL_Rect gSkipButtonRect; // Will be initialized in loadMedia
 int gCurrentIntroSlide = 0;
-Uint32 gIntroSlideStartTime = 0;
+unsigned int gIntroSlideStartTime = 0;
 int gIntroAudioChannel = -1;
 
 SDL_Texture* gGameBgFarTexture = nullptr;
-SDL_Texture* gGameBgNearTexture = nullptr; // This will be our road texture
+SDL_Texture* gGameBgNearTexture = nullptr;
 SDL_Texture* gBarrierTextures[3] = {nullptr, nullptr, nullptr};
 SDL_Texture* gLoseScreenTexture = nullptr;
 SDL_Texture* gWinScreenTexture = nullptr;
@@ -123,36 +69,24 @@ bool gMoveDown = false;
 bool gMoveLeft = false;
 bool gMoveRight = false;
 float gGameTimer = 0.0f;
-const float WIN_TIME = 40.0f;
 float gWinDelayTimer = 0.0f;
-const float WIN_DELAY_TIME = 3.0f;
-float gBackgroundX = 0.0f; // For far background horizontal scroll
-
-struct Barrier {
-    float x;
-    float y;
-    bool active;
-    int textureIndex;
-};
-
-struct Coin {
-    float x;
-    float y;
-    bool active;
-};
+float gBackgroundX = 0.0f;
 
 std::vector<Barrier> gBarriers;
 float gBarrierSpawnTimer = 0.0f;
 std::vector<Coin> gCoins;
 float gCoinSpawnTimer = 0.0f;
-const float COIN_SPAWN_INTERVAL = 1.5f;
 int gCoinCounter = 0;
 
-std::random_device gRandomDevice;
-std::mt19937 gRandomGenerator(gRandomDevice());
+std::random_device gRandomDevice_for_seeding; // Keep this local to main.cpp for seeding
+std::mt19937 gRandomGenerator(gRandomDevice_for_seeding());
 
 GameState gCurrentState = GameState::MENU;
 
+
+// --- Function Definitions ---
+
+// Helper Function: Load Texture (using SDL_image)
 SDL_Texture* loadTexture(const std::string& path, SDL_Renderer* renderer) {
     SDL_Texture* newTexture = nullptr;
     SDL_Surface* loadedSurface = IMG_Load(path.c_str());
@@ -169,6 +103,7 @@ SDL_Texture* loadTexture(const std::string& path, SDL_Renderer* renderer) {
     return newTexture;
 }
 
+// Helper Function: Render Text (using SDL_ttf)
 bool renderText(const std::string& text, int x, int y, TTF_Font* font, SDL_Color color, SDL_Renderer* renderer) {
     if (!font) { std::cerr << "ERROR: Cannot render text - Font not loaded!" << std::endl; return false; }
     if (!renderer) { std::cerr << "ERROR: Cannot render text - Renderer is null!" << std::endl; return false; }
@@ -183,6 +118,7 @@ bool renderText(const std::string& text, int x, int y, TTF_Font* font, SDL_Color
     return true;
 }
 
+// Initialization
 bool initializeSDL() {
     std::cout << "Initializing SDL..." << std::endl;
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) { std::cerr << "FATAL ERROR: SDL could not initialize! SDL_Error: " << SDL_GetError() << std::endl; return false; }
@@ -208,6 +144,7 @@ bool initializeSDL() {
     return true;
 }
 
+// Game State Reset
 void resetGameState() {
     gPlayerY = PLAYER_BOUNDS_TOP + (PLAYER_BOUNDS_BOTTOM - PLAYER_BOUNDS_TOP) / 2; 
     gPlayerX = PLAYER_START_X;
@@ -225,6 +162,7 @@ void resetGameState() {
     gCoinCounter = 0;
 }
 
+// Load Media
 bool loadMedia() {
      std::cout << "Loading Media..." << std::endl;
     gFont = TTF_OpenFont("../assets/fonts/game_font.ttf", 28);
@@ -298,6 +236,7 @@ bool loadMedia() {
     return true;
 }
 
+// SDL Cleanup
 void closeSDL() {
     if (gSkipButtonTexture) { SDL_DestroyTexture(gSkipButtonTexture); gSkipButtonTexture = nullptr; }
     if (gGameBgFarTexture) { SDL_DestroyTexture(gGameBgFarTexture); gGameBgFarTexture = nullptr; }
@@ -335,6 +274,7 @@ void closeSDL() {
     std::cout << "SDL Cleanup Complete." << std::endl;
 }
 
+// Utility Function: Play Intro Audio
 void playCurrentIntroAudio() {
     if (gCurrentIntroSlide < gIntroAudio.size() && gIntroAudio[gCurrentIntroSlide] != nullptr) {
         if (gIntroAudioChannel != -1) { Mix_HaltChannel(gIntroAudioChannel); }
@@ -346,6 +286,7 @@ void playCurrentIntroAudio() {
     gIntroSlideStartTime = SDL_GetTicks();
 }
 
+// Main Function
 int main(int argc, char* args[]) {
     std::cout << "Application Starting: " << WINDOW_TITLE << std::endl;
     if (!initializeSDL()) { std::cerr << "Initialization Failed. Exiting." << std::endl; return 1; }
@@ -464,7 +405,7 @@ int main(int argc, char* args[]) {
             case GameState::INTRO: {
                  bool advanceSlide = false;
                  if (gIntroAudioChannel != -1 && Mix_Playing(gIntroAudioChannel) == 0) { gIntroAudioChannel = -1; advanceSlide = true; }
-                 Uint32 timeElapsed = SDL_GetTicks() - gIntroSlideStartTime;
+                 unsigned int timeElapsed = SDL_GetTicks() - gIntroSlideStartTime; // Use unsigned int
                  if (!advanceSlide && timeElapsed > SLIDE_DEFAULT_DURATION_MS) { if (gIntroAudioChannel != -1) { Mix_HaltChannel(gIntroAudioChannel); gIntroAudioChannel = -1; } advanceSlide = true; }
                  if (advanceSlide) {
                       gCurrentIntroSlide++;
