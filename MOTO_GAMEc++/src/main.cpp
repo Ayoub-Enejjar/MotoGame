@@ -8,9 +8,9 @@
 #include <chrono>    // For delta time calculation
 #include <algorithm> // For std::min/max
 #include <random>    // For random barrier generation
+#include <cmath>     // For powf
 
-
-# define SCREEN_WIDTH 1050 // User specified width
+# define SCREEN_WIDTH 1045 // User specified width
 # define SCREEN_HEIGHT 690 // User specified height
 # define PLAYER_SQUARE_SIZE 95 // Player size
 # define ROAD_HEIGHT 170 // Height of the road (reduced from 180)
@@ -23,32 +23,41 @@ const int PLAYER_BOUNDS_TOP = ROAD_Y;
 const int PLAYER_BOUNDS_BOTTOM = ROAD_Y + ROAD_HEIGHT - PLAYER_SQUARE_SIZE;
 
 // Menu Config
-const int BUTTON_WIDTH = 250;  // Increased from 180
-const int BUTTON_HEIGHT = 100;  // Increased from 60
-const int BUTTON_X = 50;       // X position for buttons
-const int BUTTON_Y_PLAY = 200;  // Adjusted for larger buttons
-const int BUTTON_Y_CHARACTER = 320; // New CHARACTER button
-const int BUTTON_Y_ABOUT = 440; // Adjusted for larger buttons
-const int BUTTON_Y_QUIT = 560;  // Adjusted for larger buttons
+const int BUTTON_WIDTH = 250;
+const int BUTTON_HEIGHT = 100;
+const int BUTTON_X = 50;
+const int BUTTON_Y_PLAY = 200;
+const int BUTTON_Y_CHARACTER = 320;
+const int BUTTON_Y_ABOUT = 440;
+const int BUTTON_Y_QUIT = 560;
 const int MENU_ANIM_FRAMES = 4;
-const float MENU_ANIM_SPEED = 0.25f; // Seconds each menu background frame is displayed
+const float MENU_ANIM_SPEED = 0.25f;
 
 // Intro Config
-const int INTRO_SLIDE_COUNT = 4; // Number of intro slides/audio files
-const Uint32 SLIDE_DEFAULT_DURATION_MS = 22000; // Milliseconds per slide (adjust as needed, fallback/max duration)
+const int INTRO_SLIDE_COUNT = 4;
+const Uint32 SLIDE_DEFAULT_DURATION_MS = 22000;
 
 // Gameplay Config
-const float PLAYER_VERT_SPEED = 300.0f; // Pixels per second for vertical movement
-const float BACKGROUND_SCROLL_SPEED = 200.0f; // Speed of background scrolling
-const int PLAYER_START_X = 100; // Fixed horizontal position for the player square
+const float PLAYER_VERT_SPEED = 300.0f;
+const float PLAYER_HORIZ_SPEED = 100.0f;
+const float PLAYER_HORIZ_MOVE_RANGE = 20.0f;
+const float BACKGROUND_SCROLL_SPEED = 200.0f; // For far background
+const int PLAYER_START_X = 100;
 const int BARRIER_WIDTH = 50;
 const int BARRIER_HEIGHT = 50;
-const float BARRIER_SPEED = 400.0f;     // Speed of barriers moving towards player
-const float BARRIER_SPAWN_INTERVAL = 2.0f; // Seconds between barrier spawns
-const int MAX_BARRIERS = 5;             // Maximum number of barriers on screen
+const float BARRIER_SPEED = 400.0f;
+const float BARRIER_SPAWN_INTERVAL = 2.0f;
+const int MAX_BARRIERS = 5;
 
-const int COIN_WIDTH = BARRIER_WIDTH / 2;   // Coin width half of barrier width
-const int COIN_HEIGHT = BARRIER_HEIGHT / 2; // Coin height half of barrier height
+const int COIN_WIDTH = BARRIER_WIDTH / 2;
+const int COIN_HEIGHT = BARRIER_HEIGHT / 2;
+
+// Road Perspective Config (Texture does NOT scroll on the road surface itself)
+// MODIFIED for road to fill screen width:
+const float ROAD_PERSPECTIVE_FAR_SCALE = 1.0f;  // Road width scale at the top (Set to 1.0f to make it full width)
+const float ROAD_PERSPECTIVE_NEAR_SCALE = 1.0f; // Road width scale at the bottom (Remains 1.0f for full width)
+const float ROAD_TEXTURE_V_POWER = 1.2f;      // Power for V-texture mapping (Kept from previous "flatter" step)
+const float ROAD_TEXTURE_V_START_OFFSET = 0.0f;
 
 // --- Game States ---
 enum class GameState {
@@ -101,20 +110,23 @@ Uint32 gIntroSlideStartTime = 0;
 int gIntroAudioChannel = -1;
 
 SDL_Texture* gGameBgFarTexture = nullptr;
-SDL_Texture* gGameBgNearTexture = nullptr;
+SDL_Texture* gGameBgNearTexture = nullptr; // This will be our road texture
 SDL_Texture* gBarrierTextures[3] = {nullptr, nullptr, nullptr};
 SDL_Texture* gLoseScreenTexture = nullptr;
 SDL_Texture* gWinScreenTexture = nullptr;
 Mix_Chunk* gLoseSound = nullptr;
 Mix_Chunk* gWinSound = nullptr;
 float gPlayerY = 0.0f;
+float gPlayerX = PLAYER_START_X;
 bool gMoveUp = false;
 bool gMoveDown = false;
+bool gMoveLeft = false;
+bool gMoveRight = false;
 float gGameTimer = 0.0f;
 const float WIN_TIME = 40.0f;
 float gWinDelayTimer = 0.0f;
 const float WIN_DELAY_TIME = 3.0f;
-float gBackgroundX = 0.0f;
+float gBackgroundX = 0.0f; // For far background horizontal scroll
 
 struct Barrier {
     float x;
@@ -141,7 +153,6 @@ std::mt19937 gRandomGenerator(gRandomDevice());
 
 GameState gCurrentState = GameState::MENU;
 
-// --- Helper Function: Load Texture (using SDL_image) ---
 SDL_Texture* loadTexture(const std::string& path, SDL_Renderer* renderer) {
     SDL_Texture* newTexture = nullptr;
     SDL_Surface* loadedSurface = IMG_Load(path.c_str());
@@ -158,7 +169,6 @@ SDL_Texture* loadTexture(const std::string& path, SDL_Renderer* renderer) {
     return newTexture;
 }
 
-// --- Helper Function: Render Text (using SDL_ttf) ---
 bool renderText(const std::string& text, int x, int y, TTF_Font* font, SDL_Color color, SDL_Renderer* renderer) {
     if (!font) { std::cerr << "ERROR: Cannot render text - Font not loaded!" << std::endl; return false; }
     if (!renderer) { std::cerr << "ERROR: Cannot render text - Renderer is null!" << std::endl; return false; }
@@ -173,7 +183,6 @@ bool renderText(const std::string& text, int x, int y, TTF_Font* font, SDL_Color
     return true;
 }
 
-// --- Initialization ---
 bool initializeSDL() {
     std::cout << "Initializing SDL..." << std::endl;
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) { std::cerr << "FATAL ERROR: SDL could not initialize! SDL_Error: " << SDL_GetError() << std::endl; return false; }
@@ -199,20 +208,21 @@ bool initializeSDL() {
     return true;
 }
 
-// --- Game State Reset ---
 void resetGameState() {
-    gPlayerY = PLAYER_BOUNDS_TOP;
+    gPlayerY = PLAYER_BOUNDS_TOP + (PLAYER_BOUNDS_BOTTOM - PLAYER_BOUNDS_TOP) / 2; 
+    gPlayerX = PLAYER_START_X;
     gMoveUp = false;
     gMoveDown = false;
+    gMoveLeft = false;
+    gMoveRight = false;
     gGameTimer = 0.0f;
     gWinDelayTimer = 0.0f;
-    gBackgroundX = 0.0f;
+    gBackgroundX = 0.0f; 
     gBarriers.clear();
     gBarrierSpawnTimer = 0.0f;
     gCoins.clear();
     gCoinSpawnTimer = 0.0f;
     gCoinCounter = 0;
-    // NOTE: gSelectedCharacter is NOT reset here, it persists between games.
 }
 
 bool loadMedia() {
@@ -229,7 +239,6 @@ bool loadMedia() {
     gIntroSlides.resize(INTRO_SLIDE_COUNT);
     for (int i = 0; i < INTRO_SLIDE_COUNT; ++i) {
         gIntroSlides[i] = loadTexture("../assets/images/intro/intro_slide_0" + std::to_string(i + 1) + ".png", gRenderer);
-        // Allow missing intro slides for now
     }
     gIntroAudio.resize(INTRO_SLIDE_COUNT);
     for (int i = 0; i < INTRO_SLIDE_COUNT; ++i) {
@@ -245,13 +254,12 @@ bool loadMedia() {
 
     gGameBgFarTexture = loadTexture("../assets/images/background_far.png", gRenderer);
     if (!gGameBgFarTexture) return false;
-    gGameBgNearTexture = loadTexture("../assets/images/background_near.jpg", gRenderer);
+    gGameBgNearTexture = loadTexture("../assets/images/background_near.jpg", gRenderer); 
     if (!gGameBgNearTexture) return false;
-
+    
     gBarrierTextures[0] = loadTexture("../assets/images/barrier_01.png", gRenderer);
     gBarrierTextures[1] = loadTexture("../assets/images/barrier_02.png", gRenderer);
     gBarrierTextures[2] = loadTexture("../assets/images/barrier_03.png", gRenderer);
-    // Allow missing barrier textures for now
 
     gCoinTexture = loadTexture("../assets/images/coins.png", gRenderer);
 
@@ -266,7 +274,6 @@ bool loadMedia() {
     gLogoTexture4 = loadTexture("../assets/images/logo_04.png", gRenderer);
     gLogoTexture5 = loadTexture("../assets/images/logo_05.png", gRenderer);
 
-    // Load Win/Lose screens and sounds
     std::cout << " -> Loading Lose Screen Texture: ../assets/images/endscreen/lose_slide.png" << std::endl;
     gLoseScreenTexture = loadTexture("../assets/images/endscreen/lose_slide.png", gRenderer);
     if (gLoseScreenTexture == nullptr) { std::cerr << "WARNING: Failed to load lose screen texture!" << std::endl; }
@@ -291,7 +298,6 @@ bool loadMedia() {
     return true;
 }
 
-// --- SDL Cleanup ---
 void closeSDL() {
     if (gSkipButtonTexture) { SDL_DestroyTexture(gSkipButtonTexture); gSkipButtonTexture = nullptr; }
     if (gGameBgFarTexture) { SDL_DestroyTexture(gGameBgFarTexture); gGameBgFarTexture = nullptr; }
@@ -319,7 +325,7 @@ void closeSDL() {
 
     if (gLoseSound) { Mix_FreeChunk(gLoseSound); gLoseSound = nullptr; }
     if (gWinSound) { Mix_FreeChunk(gWinSound); gWinSound = nullptr; }
-    if (gMenuMusic) { Mix_FreeMusic(gMenuMusic); gMenuMusic = nullptr; } // Free music
+    if (gMenuMusic) { Mix_FreeMusic(gMenuMusic); gMenuMusic = nullptr; }
 
     if (gFont) { TTF_CloseFont(gFont); gFont = nullptr; }
     if (gRenderer) { SDL_DestroyRenderer(gRenderer); gRenderer = nullptr; }
@@ -329,22 +335,17 @@ void closeSDL() {
     std::cout << "SDL Cleanup Complete." << std::endl;
 }
 
-// --- Utility Function: Play Intro Audio ---
 void playCurrentIntroAudio() {
     if (gCurrentIntroSlide < gIntroAudio.size() && gIntroAudio[gCurrentIntroSlide] != nullptr) {
         if (gIntroAudioChannel != -1) { Mix_HaltChannel(gIntroAudioChannel); }
         gIntroAudioChannel = Mix_PlayChannel(-1, gIntroAudio[gCurrentIntroSlide], 0);
         if (gIntroAudioChannel == -1) { std::cerr << "WARNING: Failed to play intro audio " << gCurrentIntroSlide + 1 << "! Error: " << Mix_GetError() << std::endl; }
-        else { std::cout << " -> Playing intro audio " << gCurrentIntroSlide + 1 << " on channel " << gIntroAudioChannel << std::endl; }
     } else {
         gIntroAudioChannel = -1;
-        if (gCurrentIntroSlide < gIntroAudio.size()) { std::cout << " -> No audio loaded for intro slide " << gCurrentIntroSlide + 1 << std::endl; }
     }
     gIntroSlideStartTime = SDL_GetTicks();
 }
 
-
-// --- Main Function ---
 int main(int argc, char* args[]) {
     std::cout << "Application Starting: " << WINDOW_TITLE << std::endl;
     if (!initializeSDL()) { std::cerr << "Initialization Failed. Exiting." << std::endl; return 1; }
@@ -378,6 +379,7 @@ int main(int argc, char* args[]) {
                         if (SDL_PointInRect(&mousePoint, &gPlayButtonRect)) {
                             if(Mix_PlayingMusic()) { Mix_HaltMusic(); }
                             gCurrentState = GameState::INTRO; gCurrentIntroSlide = 0; playCurrentIntroAudio();
+                            gBackgroundX = 0.0f; 
                         } else if (SDL_PointInRect(&mousePoint, &gCharacterButtonRect)) {
                             gCurrentState = GameState::CHARACTER_SELECT;
                         } else if (SDL_PointInRect(&mousePoint, &gAboutButtonRect)) {
@@ -397,7 +399,7 @@ int main(int argc, char* args[]) {
                         gCurrentIntroSlide++;
                         if (gCurrentIntroSlide >= INTRO_SLIDE_COUNT) {
                             gCurrentState = GameState::PLAYING;
-                            resetGameState(); // Reset game state before playing
+                            resetGameState();
                         } else { playCurrentIntroAudio(); }
                     }
                 } break;
@@ -413,6 +415,8 @@ int main(int argc, char* args[]) {
                          switch(e.key.keysym.sym) {
                             case SDLK_UP: gMoveUp = true; break;
                             case SDLK_DOWN: gMoveDown = true; break;
+                            case SDLK_LEFT: gMoveLeft = true; break;
+                            case SDLK_RIGHT: gMoveRight = true; break;
                             case SDLK_ESCAPE: gCurrentState = GameState::MENU; if (gMenuMusic != nullptr && Mix_PlayingMusic() == 0) { Mix_PlayMusic(gMenuMusic, -1); } break;
                             default: break;
                          }
@@ -420,6 +424,8 @@ int main(int argc, char* args[]) {
                           switch(e.key.keysym.sym) {
                             case SDLK_UP: gMoveUp = false; break;
                             case SDLK_DOWN: gMoveDown = false; break;
+                            case SDLK_LEFT: gMoveLeft = false; break;
+                            case SDLK_RIGHT: gMoveRight = false; break;
                             default: break;
                           }
                      }
@@ -449,6 +455,7 @@ int main(int argc, char* args[]) {
 
         if (gCurrentState == GameState::EXIT) continue;
 
+        // --- UPDATE LOGIC ---
         switch(gCurrentState) {
             case GameState::MENU: {
                 gMenuAnimTimer += deltaTime;
@@ -463,7 +470,7 @@ int main(int argc, char* args[]) {
                       gCurrentIntroSlide++;
                        if (gCurrentIntroSlide >= INTRO_SLIDE_COUNT) {
                            gCurrentState = GameState::PLAYING;
-                           resetGameState(); // Reset game state before playing
+                           resetGameState();
                        } else { playCurrentIntroAudio(); }
                  }
             } break;
@@ -481,6 +488,12 @@ int main(int argc, char* args[]) {
                  gPlayerY += deltaY;
                  gPlayerY = std::max((float)PLAYER_BOUNDS_TOP, std::min(gPlayerY, (float)PLAYER_BOUNDS_BOTTOM));
 
+                 float deltaX = 0.0f;
+                 if (gMoveLeft) { deltaX -= PLAYER_HORIZ_SPEED * deltaTime; }
+                 if (gMoveRight) { deltaX += PLAYER_HORIZ_SPEED * deltaTime; }
+                 gPlayerX += deltaX;
+                 gPlayerX = std::max(PLAYER_START_X - PLAYER_HORIZ_MOVE_RANGE, std::min(gPlayerX, PLAYER_START_X + PLAYER_HORIZ_MOVE_RANGE));
+
                  gBarrierSpawnTimer += deltaTime;
                  if (gBarrierSpawnTimer >= BARRIER_SPAWN_INTERVAL) {
                      gBarrierSpawnTimer = 0.0f;
@@ -490,8 +503,12 @@ int main(int argc, char* args[]) {
                          for (auto& b : gBarriers) if (!b.active) { newBarrier = &b; break; }
                          if (!newBarrier) { gBarriers.push_back({}); newBarrier = &gBarriers.back(); }
                          newBarrier->x = SCREEN_WIDTH;
-                         std::uniform_int_distribution<> posDist(PLAYER_BOUNDS_TOP, PLAYER_BOUNDS_BOTTOM - BARRIER_HEIGHT); // Adjusted for full road height
-                         newBarrier->y = posDist(gRandomGenerator);
+                         std::uniform_int_distribution<> topOrBottomDist(0, 1);
+                         if (topOrBottomDist(gRandomGenerator) == 0) {
+                             newBarrier->y = ROAD_Y;
+                         } else {
+                             newBarrier->y = ROAD_Y + ROAD_HEIGHT - BARRIER_HEIGHT;
+                         }
                          std::uniform_int_distribution<> texDist(0, 2);
                          newBarrier->textureIndex = texDist(gRandomGenerator);
                          newBarrier->active = true;
@@ -501,13 +518,16 @@ int main(int argc, char* args[]) {
                  gCoinSpawnTimer += deltaTime;
                  if (gCoinSpawnTimer >= COIN_SPAWN_INTERVAL) {
                      gCoinSpawnTimer = 0.0f;
-                     // Spawn logic similar to barriers, but for coins
                      Coin* newCoin = nullptr;
                      for (auto& c : gCoins) if (!c.active) { newCoin = &c; break; }
                      if (!newCoin) { gCoins.push_back({}); newCoin = &gCoins.back(); }
                      newCoin->x = SCREEN_WIDTH;
-                     std::uniform_int_distribution<> posDist(PLAYER_BOUNDS_TOP, PLAYER_BOUNDS_BOTTOM - COIN_HEIGHT); // Adjusted
-                     newCoin->y = posDist(gRandomGenerator);
+                     std::uniform_int_distribution<> topOrBottomCoinDist(0, 1);
+                     if (topOrBottomCoinDist(gRandomGenerator) == 0) {
+                         newCoin->y = ROAD_Y;
+                     } else {
+                         newCoin->y = ROAD_Y + ROAD_HEIGHT - COIN_HEIGHT;
+                     }
                      newCoin->active = true;
                  }
 
@@ -515,7 +535,7 @@ int main(int argc, char* args[]) {
                      if (barrier.active) {
                          barrier.x -= BARRIER_SPEED * deltaTime;
                          if (barrier.x + BARRIER_WIDTH < 0) barrier.active = false;
-                         SDL_Rect playerRect = { PLAYER_START_X, (int)gPlayerY, PLAYER_SQUARE_SIZE, PLAYER_SQUARE_SIZE };
+                         SDL_Rect playerRect = { (int)gPlayerX, (int)gPlayerY, PLAYER_SQUARE_SIZE, PLAYER_SQUARE_SIZE };
                          int shrink = 6;
                          SDL_Rect barrierRect = { (int)barrier.x + shrink, (int)barrier.y + shrink, BARRIER_WIDTH - 2*shrink, BARRIER_HEIGHT - 2*shrink };
                          if (SDL_HasIntersection(&playerRect, &barrierRect)) {
@@ -529,7 +549,7 @@ int main(int argc, char* args[]) {
                      if (coin.active) {
                          coin.x -= BARRIER_SPEED * deltaTime;
                          if (coin.x + COIN_WIDTH < 0) coin.active = false;
-                         SDL_Rect playerRect = { PLAYER_START_X, (int)gPlayerY, PLAYER_SQUARE_SIZE, PLAYER_SQUARE_SIZE };
+                         SDL_Rect playerRect = { (int)gPlayerX, (int)gPlayerY, PLAYER_SQUARE_SIZE, PLAYER_SQUARE_SIZE };
                          SDL_Rect coinRect = { (int)coin.x, (int)coin.y, COIN_WIDTH, COIN_HEIGHT };
                          if (SDL_HasIntersection(&playerRect, &coinRect)) {
                              coin.active = false;
@@ -538,11 +558,15 @@ int main(int argc, char* args[]) {
                      }
                  }
 
-                 gBackgroundX -= BACKGROUND_SCROLL_SPEED * deltaTime;
-                 if (gBackgroundX <= -SCREEN_WIDTH) gBackgroundX = 0;
+                 gBackgroundX -= BACKGROUND_SCROLL_SPEED * deltaTime; 
+                 if (gBackgroundX <= -SCREEN_WIDTH) gBackgroundX += SCREEN_WIDTH;
+
             } break;
             case GameState::WIN_DELAY: {
                 gWinDelayTimer += deltaTime;
+                gBackgroundX -= BACKGROUND_SCROLL_SPEED * deltaTime; 
+                if (gBackgroundX <= -SCREEN_WIDTH) gBackgroundX += SCREEN_WIDTH;
+
                 if (gWinDelayTimer >= WIN_DELAY_TIME) {
                     if (gWinSound != nullptr) Mix_PlayChannel(-1, gWinSound, 0);
                     gCurrentState = GameState::WIN;
@@ -551,6 +575,7 @@ int main(int argc, char* args[]) {
             default: break;
         }
 
+        // --- RENDER LOGIC ---
         SDL_SetRenderDrawColor(gRenderer, 0x00, 0x00, 0x00, 0xFF); 
         SDL_RenderClear(gRenderer);
         
@@ -559,11 +584,8 @@ int main(int argc, char* args[]) {
                 if (!gMenuBgFrames.empty() && gCurrentMenuFrame < gMenuBgFrames.size() && gMenuBgFrames[gCurrentMenuFrame] != nullptr) { 
                     SDL_RenderCopy(gRenderer, gMenuBgFrames[gCurrentMenuFrame], nullptr, nullptr); 
                 } else { SDL_SetRenderDrawColor(gRenderer, 0x22, 0x22, 0x22, 0xFF); SDL_RenderClear(gRenderer); }
-
                 if (gLogoTexture3) { int w,h; SDL_QueryTexture(gLogoTexture3,0,0,&w,&h); SDL_Rect r = {20,20,(int)(w*0.3f),(int)(h*0.3f)}; SDL_RenderCopy(gRenderer,gLogoTexture3,0,&r); }
-                if (gLogoTexture4) { SDL_Rect r = {SCREEN_WIDTH - SCREEN_WIDTH/3, 0, SCREEN_WIDTH/3, SCREEN_HEIGHT/3}; SDL_RenderCopy(gRenderer,gLogoTexture4,0,&r); }
-if (gLogoTexture2) { int w,h; SDL_QueryTexture(gLogoTexture2,0,0,&w,&h); SDL_Rect r = {SCREEN_WIDTH-(int)(w*0.4f)-20, 20, (int)(w*0.4f),(int)(h*0.4f)}; SDL_RenderCopy(gRenderer,gLogoTexture2,0,&r); }
-                
+                if (gLogoTexture2) { int w,h; SDL_QueryTexture(gLogoTexture2,0,0,&w,&h); SDL_Rect r = {SCREEN_WIDTH-(int)(w*0.4f)-20, 20, (int)(w*0.4f),(int)(h*0.4f)}; SDL_RenderCopy(gRenderer,gLogoTexture2,0,&r); }
                 renderText("PLAY", BUTTON_X, BUTTON_Y_PLAY, gFont, SDL_PointInRect(&mousePoint, &gPlayButtonRect) ? gButtonHoverColor : gTextColor, gRenderer);
                 renderText("CHARACTER", BUTTON_X, BUTTON_Y_CHARACTER, gFont, SDL_PointInRect(&mousePoint, &gCharacterButtonRect) ? gButtonHoverColor : gTextColor, gRenderer);
                 renderText("ABOUT", BUTTON_X, BUTTON_Y_ABOUT, gFont, SDL_PointInRect(&mousePoint, &gAboutButtonRect) ? gButtonHoverColor : gTextColor, gRenderer);
@@ -587,31 +609,80 @@ if (gLogoTexture2) { int w,h; SDL_QueryTexture(gLogoTexture2,0,0,&w,&h); SDL_Rec
                 renderText("Reach the final destination point",tx,y,gFont,gAboutTextColor,gRenderer); y+=ls;
                 renderText("before the timer runs out!",tx,y,gFont,gAboutTextColor,gRenderer); y+=ls+ss;
                 renderText("Rules",tx,y,gFont,gHeaderColor,gRenderer); y+=ls;
-                renderText("- You have only 60 seconds to complete the race.",tx,y,gFont,gAboutTextColor,gRenderer); y+=ls; // Note: WIN_TIME is 40s
+                renderText("- You have only 40 seconds to complete the race.",tx,y,gFont,gAboutTextColor,gRenderer); y+=ls;
                 renderText("- If the timer hits zero before you finish, you lose.",tx,y,gFont,gAboutTextColor,gRenderer); y+=ls;
-                renderText("- Avoid obstacles (Customize if needed).",tx,y,gFont,gAboutTextColor,gRenderer); y+=ls+ss;
+                renderText("- Avoid obstacles.",tx,y,gFont,gAboutTextColor,gRenderer); y+=ls+ss;
                 renderText("Controls",tx,y,gFont,gHeaderColor,gRenderer); y+=ls;
                 renderText("- Left/Right Arrows: Select character (selection screen)",tx,y,gFont,gAboutTextColor,gRenderer); y+=ls;
                 renderText("- Enter: Confirm selection / Start game",tx,y,gFont,gAboutTextColor,gRenderer); y+=ls;
-                renderText("- Right Arrow (Game): Accelerate / Move Forward",tx,y,gFont,gAboutTextColor,gRenderer); y+=ls; // Note: No horizontal movement implemented
+                renderText("- Left/Right Arrows (Game): Move Horizontally (Slightly)",tx,y,gFont,gAboutTextColor,gRenderer); y+=ls; 
                 renderText("- Up/Down Arrows (Game): Move Vertically",tx,y,gFont,gAboutTextColor,gRenderer); y+=ls;
                 renderText("- ESC (Game): Return to Main Menu",tx,y,gFont,gAboutTextColor,gRenderer);
                 if(gLogoTexture){int w,h;SDL_QueryTexture(gLogoTexture,0,0,&w,&h);float sc=0.8f; int sw=(int)(w*sc),sh=(int)(h*sc);SDL_Rect lr={rsX+(400-sw)/2,(SCREEN_HEIGHT-sh)/2,sw,sh};SDL_RenderCopy(gRenderer,gLogoTexture,0,&lr);}
             } break;
             
-            case GameState::PLAYING: {
-                if (gGameBgFarTexture) { SDL_Rect r1={(int)gBackgroundX,-80,SCREEN_WIDTH,SCREEN_HEIGHT},r2={(int)gBackgroundX+SCREEN_WIDTH,-80,SCREEN_WIDTH,SCREEN_HEIGHT}; SDL_RenderCopy(gRenderer,gGameBgFarTexture,0,&r1); SDL_RenderCopy(gRenderer,gGameBgFarTexture,0,&r2); }
+            case GameState::PLAYING:
+            case GameState::WIN_DELAY: 
+            {
+                // 1. Render Far Background (Scrolling)
+                if (gGameBgFarTexture) {
+                    SDL_Rect r1 = {(int)gBackgroundX, -80, SCREEN_WIDTH, SCREEN_HEIGHT};
+                    SDL_Rect r2 = {(int)gBackgroundX + SCREEN_WIDTH, -80, SCREEN_WIDTH, SCREEN_HEIGHT};
+                    SDL_RenderCopy(gRenderer, gGameBgFarTexture, nullptr, &r1);
+                    SDL_RenderCopy(gRenderer, gGameBgFarTexture, nullptr, &r2);
+                }
+
+                // 2. Render Road with Static Perspective (Scanline method)
+                if (gGameBgNearTexture && ROAD_HEIGHT > 0) {
+                    int roadTexW, roadTexH;
+                    SDL_QueryTexture(gGameBgNearTexture, nullptr, nullptr, &roadTexW, &roadTexH);
+
+                    if (roadTexW > 0 && roadTexH > 0) { 
+                        float world_segment_depth_for_texture_map = (float)roadTexH; 
+
+                        for (int y_iter = 0; y_iter < ROAD_HEIGHT; ++y_iter) {
+                            float screen_y_on_road_segment = ROAD_Y + y_iter;
+                            float norm_y_on_segment = (float)y_iter / (ROAD_HEIGHT - 1.0f);
+                            if (ROAD_HEIGHT <= 1) norm_y_on_segment = 1.0f;
+
+                            float current_width_scale = ROAD_PERSPECTIVE_FAR_SCALE + norm_y_on_segment * (ROAD_PERSPECTIVE_NEAR_SCALE - ROAD_PERSPECTIVE_FAR_SCALE);
+                            int scanline_on_screen_width = (int)(SCREEN_WIDTH * current_width_scale);
+                            int scanline_on_screen_x = (SCREEN_WIDTH - scanline_on_screen_width) / 2;
+
+                            float texture_v_normalized = powf(norm_y_on_segment, ROAD_TEXTURE_V_POWER);
+                            int src_v = (int)(ROAD_TEXTURE_V_START_OFFSET + texture_v_normalized * world_segment_depth_for_texture_map);
+                            
+                            src_v = std::max(0, std::min(src_v, roadTexH - 1));
+                            
+                            SDL_Rect srcRectScanline = {0, src_v, roadTexW, 1}; 
+                            SDL_Rect destRectScanline = {scanline_on_screen_x, (int)screen_y_on_road_segment, scanline_on_screen_width, 1};
+                            
+                            if (destRectScanline.w > 0) { 
+                                SDL_RenderCopy(gRenderer, gGameBgNearTexture, &srcRectScanline, &destRectScanline);
+                            }
+                        }
+                    }
+                }
+
+                // 3. Render Timer Bar
                 int barMaxWidth=SCREEN_WIDTH/4, barH=18, barX=20, barY=15; float timeLeft=std::max(0.0f,WIN_TIME-gGameTimer); int barW=(int)(barMaxWidth*(timeLeft/WIN_TIME));
                 SDL_Rect tBarBg={barX,barY,barMaxWidth,barH},tBar={barX,barY,barW,barH}; SDL_SetRenderDrawColor(gRenderer,0,0,0,255); SDL_RenderFillRect(gRenderer,&tBarBg); SDL_SetRenderDrawColor(gRenderer,255,215,0,255); SDL_RenderFillRect(gRenderer,&tBar);
-                if (gGameBgNearTexture) { SDL_Rect roadR={0,ROAD_Y,SCREEN_WIDTH,ROAD_HEIGHT}; SDL_RenderCopy(gRenderer,gGameBgNearTexture,0,&roadR); }
 
+                // 4. Render Barriers and Coins
                 for (const auto& b : gBarriers) if (b.active) { SDL_Rect br={(int)b.x,(int)b.y,BARRIER_WIDTH,BARRIER_HEIGHT}; if(gBarrierTextures[b.textureIndex]) SDL_RenderCopy(gRenderer,gBarrierTextures[b.textureIndex],0,&br); else {SDL_SetRenderDrawColor(gRenderer,255,0,0,255);SDL_RenderFillRect(gRenderer,&br);}}
-                for (const auto& c : gCoins) if (c.active) { SDL_Rect cr={(int)c.x,(int)c.y,COIN_WIDTH,COIN_HEIGHT}; if(gCoinTexture)SDL_RenderCopy(gRenderer,gCoinTexture,0,&cr); else {SDL_SetRenderDrawColor(gRenderer,255,215,0,255); SDL_RenderFillRect(gRenderer, &cr);/*Fallback*/}}
+                for (const auto& c : gCoins) if (c.active) { SDL_Rect cr={(int)c.x,(int)c.y,COIN_WIDTH,COIN_HEIGHT}; if(gCoinTexture)SDL_RenderCopy(gRenderer,gCoinTexture,0,&cr); else {SDL_SetRenderDrawColor(gRenderer,255,215,0,255); SDL_RenderFillRect(gRenderer, &cr);}}
                 
-                SDL_Rect playerR = {PLAYER_START_X,(int)gPlayerY,PLAYER_SQUARE_SIZE,PLAYER_SQUARE_SIZE};
+                // 5. Render Player
+                SDL_Rect playerR = {(int)gPlayerX,(int)gPlayerY,PLAYER_SQUARE_SIZE,PLAYER_SQUARE_SIZE};
                 SDL_Texture* currentPTex = (gSelectedCharacter==0) ? gPlayerFemaleTexture : gPlayerMaleTexture;
                 if(currentPTex) SDL_RenderCopy(gRenderer,currentPTex,0,&playerR); else {SDL_SetRenderDrawColor(gRenderer,255,0,0,255);SDL_RenderFillRect(gRenderer,&playerR);}
+                
+                // 6. Render Coin Counter
                 renderText(std::to_string(gCoinCounter),SCREEN_WIDTH-150,20,gFont,gTextColor,gRenderer);
+
+                if (gCurrentState == GameState::WIN_DELAY) {
+                    renderText("YOU WIN!", SCREEN_WIDTH / 2 - 100, SCREEN_HEIGHT / 2 - 50, gFont, gHeaderColor, gRenderer);
+                }
             } break;
 
             case GameState::LOSE: {
@@ -622,18 +693,6 @@ if (gLogoTexture2) { int w,h; SDL_QueryTexture(gLogoTexture2,0,0,&w,&h); SDL_Rec
             case GameState::WIN: {
                 if (gWinScreenTexture) SDL_RenderCopy(gRenderer, gWinScreenTexture, nullptr, nullptr);
                 else { SDL_SetRenderDrawColor(gRenderer,0x11,0x11,0x11,0xFF); SDL_RenderClear(gRenderer); renderText("YOU WIN!",SCREEN_WIDTH/2-100,SCREEN_HEIGHT/2-50,gFont,gTextColor,gRenderer); renderText("Click to return",SCREEN_WIDTH/2-100,SCREEN_HEIGHT/2+20,gFont,gTextColor,gRenderer); }
-            } break;
-
-            case GameState::WIN_DELAY: { // Render PLAYING state during delay
-                if (gGameBgFarTexture) { SDL_Rect r1={(int)gBackgroundX,-80,SCREEN_WIDTH,SCREEN_HEIGHT},r2={(int)gBackgroundX+SCREEN_WIDTH,-80,SCREEN_WIDTH,SCREEN_HEIGHT}; SDL_RenderCopy(gRenderer,gGameBgFarTexture,0,&r1); SDL_RenderCopy(gRenderer,gGameBgFarTexture,0,&r2); }
-                if (gGameBgNearTexture) { SDL_Rect roadR={0,ROAD_Y,SCREEN_WIDTH,ROAD_HEIGHT}; SDL_RenderCopy(gRenderer,gGameBgNearTexture,0,&roadR); }
-                for (const auto& b : gBarriers) if (b.active) { SDL_Rect br={(int)b.x,(int)b.y,BARRIER_WIDTH,BARRIER_HEIGHT}; if(gBarrierTextures[b.textureIndex]) SDL_RenderCopy(gRenderer,gBarrierTextures[b.textureIndex],0,&br); else {SDL_SetRenderDrawColor(gRenderer,255,0,0,255);SDL_RenderFillRect(gRenderer,&br);}}
-                for (const auto& c : gCoins) if (c.active) { SDL_Rect cr={(int)c.x,(int)c.y,COIN_WIDTH,COIN_HEIGHT}; if(gCoinTexture)SDL_RenderCopy(gRenderer,gCoinTexture,0,&cr); else {SDL_SetRenderDrawColor(gRenderer,255,215,0,255); SDL_RenderFillRect(gRenderer, &cr);}}
-                SDL_Rect playerR = {PLAYER_START_X,(int)gPlayerY,PLAYER_SQUARE_SIZE,PLAYER_SQUARE_SIZE};
-                SDL_Texture* currentPTex = (gSelectedCharacter==0) ? gPlayerFemaleTexture : gPlayerMaleTexture;
-                if(currentPTex) SDL_RenderCopy(gRenderer,currentPTex,0,&playerR); else {SDL_SetRenderDrawColor(gRenderer,255,0,0,255);SDL_RenderFillRect(gRenderer,&playerR);}
-                renderText(std::to_string(gCoinCounter),SCREEN_WIDTH-150,20,gFont,gTextColor,gRenderer);
-                renderText("YOU WIN!",SCREEN_WIDTH/2-100,SCREEN_HEIGHT/2-50,gFont,gHeaderColor,gRenderer); // Big win text
             } break;
 
             case GameState::CHARACTER_SELECT: {
